@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Career Aptitude Test (Preset)</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:20px;max-width:900px}
+    h1{font-size:18px;margin-bottom:12px}
+    .q{margin:10px 0;padding:8px;border-radius:6px}
+    .q p{margin:0 0 6px}
+    .radios label{margin-right:10px;font-size:14px}
+    button{padding:8px 12px;border-radius:6px;border:1px solid #ccc;background:#f7f7f7}
+    pre{background:#111;color:#eee;padding:12px;border-radius:6px;overflow:auto}
+    .small{font-size:13px;color:#444;margin-top:6px}
+  </style>
+</head>
+<body>
+  <h1>Career aptitude test — minimal UI</h1>
+  <div id="app">
+    <div id="questions"></div>
+    <div style="margin-top:12px">
+      <button id="submitBtn">Submit</button>
+      <button id="presetBtn">Use Preset Scores</button>
+    </div>
+    <div class="small">Result JSON (shown below):</div>
+    <pre id="result">{}</pre>
+
+    <div class="small" style="margin-top:10px">cURL (example request you asked to include):</div>
+    <pre id="curl"></pre>
+
+    <div class="small" style="margin-top:10px">POST Response:</div>
+    <pre id="response">(no response yet)</pre>
+  </div>
+
+  <script>
+    const big5Questions = [
+      {id:'b1', text:'I am the life of the party.', dim:'extraversion'},
+      {id:'b2', text:'I sympathize with others’ feelings.', dim:'agreeableness'},
+      {id:'b3', text:'I get chores done right away.', dim:'conscientiousness'},
+      {id:'b4', text:'I get stressed out easily.', dim:'neuroticism'},
+      {id:'b5', text:'I have a vivid imagination.', dim:'openness'}
+    ];
+
+    const riasecQuestions = [
+      {id:'r1', text:'I like working with tools and machines.', dim:'realistic'},
+      {id:'r2', text:'I enjoy solving math or science problems.', dim:'investigative'},
+      {id:'r3', text:'I enjoy creative arts like music or writing.', dim:'artistic'},
+      {id:'r4', text:'I like helping people with their problems.', dim:'social'},
+      {id:'r5', text:'I like to lead and persuade people.', dim:'enterprising'},
+      {id:'r6', text:'I like working with data and details.', dim:'conventional'}
+    ];
+
+    function renderQuestions(){
+      const container = document.getElementById('questions');
+      container.innerHTML = '';
+      const all = [...big5Questions.map(q=>({...q,type:'big5'})), ...riasecQuestions.map(q=>({...q,type:'riasec'}))];
+      all.forEach((q, idx) =>{
+        const div = document.createElement('div'); div.className = 'q';
+        const p = document.createElement('p'); p.innerText = (idx+1) + '. ' + q.text;
+        div.appendChild(p);
+        const radios = document.createElement('div'); radios.className = 'radios';
+        for(let v=1; v<=5; v++){
+          const id = `q_${q.id}_v${v}`;
+          const label = document.createElement('label');
+          label.htmlFor = id;
+          label.innerHTML = `<input type="radio" name="q_${q.id}" id="${id}" value="${v}"> ${v}`;
+          radios.appendChild(label);
+        }
+        const meta = document.createElement('input'); meta.type='hidden'; meta.dataset.dim = q.dim; meta.dataset.type = q.type; meta.dataset.qid = q.id;
+        div.appendChild(radios);
+        div.appendChild(meta);
+        container.appendChild(div);
+      });
+    }
+
+    function computeScores(){
+      const big5Dims = ['extraversion','agreeableness','conscientiousness','neuroticism','openness'];
+      const riasecDims = ['realistic','investigative','artistic','social','enterprising','conventional'];
+
+      const big5Agg = {}; big5Dims.forEach(d=> big5Agg[d]={sum:0,count:0});
+      const riasecAgg = {}; riasecDims.forEach(d=> riasecAgg[d]={sum:0,count:0});
+
+      const qDivs = Array.from(document.querySelectorAll('.q'));
+      qDivs.forEach(div=>{
+        const hidden = div.querySelector('input[type=hidden]');
+        const dim = hidden.dataset.dim;
+        const type = hidden.dataset.type;
+        const qid = hidden.dataset.qid;
+        const radios = div.querySelectorAll(`input[name='q_${qid}']`);
+        let val=null; radios.forEach(r=>{if(r.checked) val=Number(r.value)});
+        if(val===null) return;
+        if(type==='big5'){ if(big5Agg[dim]){big5Agg[dim].sum+=val;big5Agg[dim].count++} }
+        else { if(riasecAgg[dim]){riasecAgg[dim].sum+=val;riasecAgg[dim].count++} }
+      });
+
+      const big5_scores={};
+      for(const d in big5Agg){ const a=big5Agg[d]; big5_scores[d]=a.count?(a.sum/a.count).toFixed(1)*1:0; }
+      const riasec_scores={};
+      for(const d in riasecAgg){ const a=riasecAgg[d]; riasec_scores[d]=a.count?(a.sum/a.count).toFixed(1)*1:0; }
+      return {big5_scores, riasec_scores};
+    }
+
+    function showResult(result){
+      const out = JSON.stringify(result,null,2);
+      document.getElementById('result').innerText = out;
+      document.getElementById('curl').innerText = `curl -X POST \"http://127.0.0.1:8000/personality-career-match\" ^\n-H \"Content-Type: application/json\" ^\n-d '${out}'`;
+    }
+
+    async function postResult(result){
+      try{
+        const res = await fetch('http://127.0.0.1:8000/personality-career-match',{
+          method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result)});
+        const text = await res.text();
+        document.getElementById('response').innerText = `Status: ${res.status}\n${text}`;
+      }catch(e){
+        document.getElementById('response').innerText = 'POST failed: ' + e;
+      }
+    }
+
+    document.getElementById('submitBtn').addEventListener('click', async ()=>{
+      const result = computeScores();
+      showResult(result);
+      await postResult(result);
+    });
+
+    document.getElementById('presetBtn').addEventListener('click', async ()=>{
+      const preset = {
+        "big5_scores": {
+          "extraversion": 4.2,
+          "agreeableness": 3.8,
+          "conscientiousness": 4.5,
+          "neuroticism": 2.1,
+          "openness": 4.7
+        },
+        "riasec_scores": {
+          "realistic": 3.2,
+          "investigative": 4.6,
+          "artistic": 4.9,
+          "social": 3.5,
+          "enterprising": 2.8,
+          "conventional": 3.0
+        }
+      };
+      showResult(preset);
+      await postResult(preset);
+    });
+
+    renderQuestions();
+  </script>
+</body>
+</html>
